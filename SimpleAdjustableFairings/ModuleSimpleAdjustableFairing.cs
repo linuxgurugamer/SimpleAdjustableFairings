@@ -1,10 +1,11 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
 namespace SimpleAdjustableFairings
 {
-    public class ModuleSimpleAdjustableFairing : PartModule, IScalarModule, IPartCoMModifier
+    public class ModuleSimpleAdjustableFairing : PartModule, IScalarModule, IPartCoMModifier, ISerializationCallbackReceiver
     {
         public const string FAIRING_ROOT_TRANSFORM_NAME = "FairingRoot";
 
@@ -83,6 +84,9 @@ namespace SimpleAdjustableFairings
         private EventData<float, float> fairingDeployStart = new EventData<float, float>("FairingDeployStart");
         private EventData<float> fairingDeployEnd = new EventData<float>("FairingDeployEnd");
 
+        [SerializeField]
+        private string serializedData;
+
         #endregion
 
         #region Properties
@@ -118,28 +122,17 @@ namespace SimpleAdjustableFairings
 
         #endregion
 
-        #region Setup
+        #region Actions
 
-        public override void OnAwake()
+        [KSPAction("Deploy")]
+        public void DeployAction(KSPActionParam param)
         {
-            base.OnAwake();
-
-            // Get coneData and wallData from prefab since they are non-serializable
-            if (part.partInfo != null)
-            {
-                ModuleSimpleAdjustableFairing module = part.partInfo.partPrefab?.FindModuleImplementing<ModuleSimpleAdjustableFairing>();
-
-                if (module == null)
-                {
-                    this.LogError("Cannot find module on prefab!");
-                }
-                else
-                {
-                    WallData = part.partInfo.partPrefab?.FindModuleImplementing<ModuleSimpleAdjustableFairing>()?.WallData;
-                    ConeData = part.partInfo.partPrefab?.FindModuleImplementing<ModuleSimpleAdjustableFairing>()?.ConeData;
-                }
-            }
+            Deploy();
         }
+
+        #endregion
+
+        #region Setup
 
         public override void OnLoad(ConfigNode node)
         {
@@ -192,7 +185,7 @@ namespace SimpleAdjustableFairings
 
             if (state == StartState.Editor)
             {
-                SetupGUICallbacks();
+                SetupEditorGui();
             }
             else
             {
@@ -200,6 +193,44 @@ namespace SimpleAdjustableFairings
                 UpdateFAR();
                 IgnoreColliders();
             }
+        }
+
+        #endregion
+
+        #region Serialization
+
+        public void OnBeforeSerialize()
+        {
+            ConfigNode node = new ConfigNode("SERIALIZED_DATA");
+            if (WallData != null) node.AddNode("wallData", ConfigNode.CreateConfigFromObject(WallData));
+            if (ConeData != null) node.AddNode("coneData", ConfigNode.CreateConfigFromObject(ConeData));
+            serializedData = node.ToString();
+        }
+
+        public void OnAfterDeserialize()
+        {
+            if (serializedData == null)
+            {
+                this.LogWarning("serialized data is null!");
+                return;
+            }
+
+            ConfigNode node = ConfigNode.Parse(serializedData);
+            ConfigNode node2 = node.GetNode("SERIALIZED_DATA");
+
+            if (node2 == null)
+            {
+                this.LogWarning("no serialized data found on node!");
+                return;
+            }
+
+            ConfigNode wallDataNode = node2.GetNode("wallData");
+            if (wallDataNode != null) WallData = ConfigNode.CreateObjectFromConfig<ModelData>(wallDataNode);
+            else this.LogWarning("no wall data found in node!");
+
+            ConfigNode coneDataNode = node2.GetNode("coneData");
+            if (coneDataNode != null) ConeData = ConfigNode.CreateObjectFromConfig<ModelData>(coneDataNode);
+            else this.LogWarning("no cone data found in node!");
         }
 
         #endregion
@@ -396,9 +427,11 @@ namespace SimpleAdjustableFairings
             part.ModifyCoM();
         }
 
-        private void SetupGUICallbacks()
+        private void SetupEditorGui()
         {
-            this.GetUIControl(nameof(numSegments)).onFieldChanged = OnSegmentNumberChange;
+            UI_FloatRange numSegmentsControl = this.GetUIControl<UI_FloatRange>(nameof(numSegments));
+            numSegmentsControl.onFieldChanged = OnSegmentNumberChange;
+            numSegmentsControl.maxValue = Math.Max(maxSegments, numSegments);
             this.GetUIControl(nameof(transparentEditor)).onFieldChanged = OnToggleTransparent;
             this.GetUIControl(nameof(openFairing)).onFieldChanged = OnToggleOpen;
             this.GetUIControl(nameof(autoDeploy)).onFieldChanged = OnToggleAutodeploy;
